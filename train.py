@@ -24,6 +24,8 @@ optimizer = Adam(pde_cnn.parameters(),lr=params.lr)
 
 # initialize logger and, if demanded, load previous model / optimizer
 logger = Logger(get_hyperparam(params),use_csv=False,use_tensorboard=params.log)
+logger.save_params_to_file(params)
+
 if params.load_latest or params.load_date_time is not None or params.load_index is not None:
 	load_logger = Logger(get_hyperparam(params),use_csv=False,use_tensorboard=False)
 	if params.load_optimizer:
