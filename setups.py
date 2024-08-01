@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from PIL import Image
+from get_param import params
 
 """
 ask-tell interface:
@@ -18,7 +19,7 @@ img_dict = {"submarine":submarine,"fish":fish,"cyber":cyber,"wing":wing,"2_objec
 rod_size=8
 
 class Dataset:
-	def __init__(self,w,h,d,batch_size=100,dataset_size=1000,average_sequence_length=5000,interactive=False,max_speed=3,brown_damping=0.9995,brown_velocity=0.005,init_velocity=0,dt=1,types=["box"],images=["suzanne"],mu_range=[0.1,5],rho_range=[0.1,5]):
+	def __init__(self,w,h,d,batch_size=100,dataset_size=1000,average_sequence_length=5000,interactive=False,max_speed=3,brown_damping=0.9995,brown_velocity=0.005,init_velocity=0,dt=1,types=["box"],images=["suzanne"],mu=1):
 		"""
 		:w,h,d: width, height, depth (sizes in x,y,z direction)
 		:types: possibilities: "no_box","box","rod_y","rod_z","moving_rod_y","moving_rod_z","magnus_y","magnus_z","ball","image","benchmark"
@@ -28,15 +29,12 @@ class Dataset:
 		self.batch_size = batch_size
 		self.dataset_size = dataset_size
 		self.average_sequence_length = average_sequence_length
-		self.a = torch.zeros(dataset_size,3,w,h,d)
-		self.p = torch.zeros(dataset_size,1,w,h,d)
 		self.v_cond = torch.zeros(dataset_size,3,w,h,d)
-		self.mu_range = [np.log(mu_range[0]),np.log(mu_range[1])]
-		self.rho_range = [np.log(rho_range[0]),np.log(rho_range[1])]
-		self.mu = torch.exp(torch.rand(dataset_size,1,1,1,1)*(self.mu_range[1]-self.mu_range[0])+self.mu_range[0])
-		self.rho = torch.exp(torch.rand(dataset_size,1,1,1,1)*(self.rho_range[1]-self.rho_range[0])+self.rho_range[0])
-		
+		self.p_cond = torch.zeros(dataset_size,1,w,h,d)
+		self.T_cond = torch.zeros(dataset_size,1,w,h,d)
+
 		self.cond_mask = torch.zeros(dataset_size,1,w,h,d)
+		self.bc_mask = torch.zeros(dataset_size,1,w,h,d)
 		self.env_info = [{} for _ in range(dataset_size)]
 		self.interactive = interactive
 		self.interactive_spring = 150#300#200#~ 1/spring constant to move object
@@ -53,23 +51,21 @@ class Dataset:
 		self.mousez = 0
 		self.mousev = 0
 		self.mousew = 0
-		self.mousemu = 1
-		self.mouserho = 1
-		
+	
+		self.v   = torch.zeros(dataset_size,3,w,h,d)
+		self.p   = torch.zeros(dataset_size,1,w,h,d)
+		self.T   = torch.zeros(dataset_size,1,w,h,d)
+
 		for i in range(dataset_size):
 			self.reset_env(i)
 		
 		self.t = 0
 		self.i = 0
-	
+
 	def reset_env(self,index):
-		self.a[index] = 0
-		self.p[index] = 0
-		self.mu[index] = torch.exp(torch.rand(1)*(self.mu_range[1]-self.mu_range[0])+self.mu_range[0])
-		self.rho[index] = torch.exp(torch.rand(1)*(self.rho_range[1]-self.rho_range[0])+self.rho_range[0])
-		self.mousemu = self.mu[index]
-		self.mouserho = self.rho[index]
 		
+		self.v[index]   = 0
+
 		self.cond_mask[index]=0
 		self.cond_mask[index,:,0:5,:,:]=1
 		self.cond_mask[index,:,(self.w-5):self.w,:,:]=1
@@ -77,8 +73,18 @@ class Dataset:
 		self.cond_mask[index,:,:,(self.h-3):self.h,:]=1
 		self.cond_mask[index,:,:,:,0:3]=1
 		self.cond_mask[index,:,:,:,(self.d-3):self.d]=1
-		
+
+		self.bc_mask[index]=0
+		self.bc_mask[index,:,0:5,:,:]=1
+		self.bc_mask[index,:,(self.w-5):self.w,:,:]=1
+		self.bc_mask[index,:,:,0:3,:]=1
+		self.bc_mask[index,:,:,(self.h-3):self.h,:]=1
+		self.bc_mask[index,:,:,:,0:3]=1
+		self.bc_mask[index,:,:,:,(self.d-3):self.d]=1
+
 		type = np.random.choice(self.types)
+
+#{{{types
 		
 		if type == "magnus_z":
 			flow_v = self.max_speed*(np.random.rand()-0.5)*2
@@ -303,49 +309,6 @@ class Dataset:
 			self.mousez = object_z
 			self.mousev = flow_v
 		
-		if type == "benchmark":# benchmark setup
-			benchmark_mu = 0.1
-			benchmark_rho = 4
-			self.mu[index] = benchmark_mu
-			self.rho[index] = benchmark_rho
-			object_w = 5
-			object_h = 5
-			object_d = 5
-			flow_v = 0.5
-			object_x = self.w//2
-			object_y = self.h//2
-			object_z = self.d//2
-			object_vx = 0
-			object_vy = 0
-			object_vz = 0
-			
-			self.cond_mask[index,:,(object_x-object_w):(object_x+object_w),(object_y-object_h):(object_y+object_h),(object_z-object_d):(object_z+object_d)] = 1
-			self.v_cond[index,0,(object_x-object_w):(object_x+object_w),(object_y-object_h):(object_y+object_h),(object_z-object_d):(object_z+object_d)] = object_vx
-			self.v_cond[index,1,(object_x-object_w):(object_x+object_w),(object_y-object_h):(object_y+object_h),(object_z-object_d):(object_z+object_d)] = object_vy
-			self.v_cond[index,2,(object_x-object_w):(object_x+object_w),(object_y-object_h):(object_y+object_h),(object_z-object_d):(object_z+object_d)] = object_vz
-			
-			self.v_cond[index,0,0:5,10:(self.h-10),10:(self.d-10)]=flow_v
-			self.v_cond[index,0,(self.w-5):self.w,10:(self.h-10),10:(self.d-10)]=flow_v
-			self.v_cond[index] = self.v_cond[index]*self.cond_mask[index]
-			
-			self.env_info[index]["type"] = type
-			self.env_info[index]["x"] = object_x
-			self.env_info[index]["y"] = object_y
-			self.env_info[index]["z"] = object_z
-			self.env_info[index]["vx"] = object_vx
-			self.env_info[index]["vy"] = object_vy
-			self.env_info[index]["vz"] = object_vz
-			self.env_info[index]["w"] = object_w
-			self.env_info[index]["h"] = object_h
-			self.env_info[index]["d"] = object_d
-			self.env_info[index]["flow_v"] = flow_v
-			self.mousex = object_x
-			self.mousey = object_y
-			self.mousez = object_z
-			self.mousemu = benchmark_mu
-			self.mouserho = benchmark_rho
-			self.mousev = flow_v
-		
 		if type=="image":
 			
 			image = np.random.choice(self.images)
@@ -437,12 +400,32 @@ class Dataset:
 			self.mousez = object_z
 			self.mousev = flow_v
 	
+#}}}
+
+		#IC, BC for p, T
+
+		p_profile = (params.sp) / ( np.exp((np.arange(0,self.d,1)*params.dz)/params.scale_height) ) # z-coord pressure profile for scale height(p)
+		rho_profile = 1.225/( np.exp((np.arange(0,self.d,1)*params.dz)/params.scale_height) )   # z-coord rho profile for scale height(p)
+
+		self.p[index]   = torch.from_numpy(np.broadcast_to(p_profile,(self.w,self.h,self.d)))
+
+		T_profile     = (273.15 + 15) - (10./1000.)*(np.arange(0,self.d,1)*params.dz)           # dry lapse rate
+		self.T[index]   = torch.from_numpy(np.broadcast_to(T_profile,(self.w,self.h,self.d)))
+
+		p_x   = np.linspace(1,-1,self.w) * flow_v * self.w * params.dx 
+		p_X   = p_x.reshape(self.w, 1,1)
+		p_pur = np.broadcast_to(p_X,(self.w,self.h,self.d))
+
+		#self.p_cond[index] = self.p[index] + p_pur
+		self.p_cond[index] = self.p[index]
+
+		#self.T_cond[index] = self.T[index] + p_pur/(rho_profile*params.R) 
+		self.T_cond[index] = self.T[index]
+
+		self.v[index]      = flow_v
+
 	def update_envs(self,indices):
 		for index in indices:
-			
-			if self.interactive:
-				self.mu[index] = self.mousemu
-				self.rho[index] = self.mouserho
 			
 			if self.env_info[index]["type"] == "magnus_z":
 				object_r = self.env_info[index]["r"]
@@ -455,8 +438,8 @@ class Dataset:
 					object_vx = vx_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					object_vy = vy_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_y = self.env_info[index]["y"]+(vy_old+object_vy)/2*self.dt
+					object_x = self.env_info[index]["x"]+( (vx_old+object_vx)/2*self.dt ) / params.dx
+					object_y = self.env_info[index]["y"]+( (vy_old+object_vy)/2*self.dt ) / params.dy
 					
 					if object_x < object_r + 10:
 						object_x = object_r + 10
@@ -478,8 +461,8 @@ class Dataset:
 					object_vx = max(min((self.mousex-self.env_info[index]["x"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					object_vy = max(min((self.mousey-self.env_info[index]["y"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_y = self.env_info[index]["y"]+(vy_old+object_vy)/2*self.dt
+					object_x = self.env_info[index]["x"]+( (vx_old+object_vx)/2*self.dt ) / params.dx
+					object_y = self.env_info[index]["y"]+( (vy_old+object_vy)/2*self.dt ) / params.dy
 					
 					if object_x < object_r + 10:
 						object_x = object_r + 10
@@ -540,8 +523,8 @@ class Dataset:
 					object_vx = vx_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					object_vz = vz_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_z = self.env_info[index]["z"]+(vz_old+object_vz)/2*self.dt
+					object_x = self.env_info[index]["x"]+( (vx_old+object_vx)/2*self.dt ) / params.dx
+					object_z = self.env_info[index]["z"]+( (vz_old+object_vz)/2*self.dt ) / params.dz
 					
 					if object_x < object_r + 10:
 						object_x = object_r + 10
@@ -563,8 +546,8 @@ class Dataset:
 					object_vx = max(min((self.mousex-self.env_info[index]["x"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					object_vz = max(min((self.mousez-self.env_info[index]["z"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_z = self.env_info[index]["z"]+(vz_old+object_vz)/2*self.dt
+					object_x = self.env_info[index]["x"]+( (vx_old+object_vx)/2*self.dt ) / params.dx
+					object_z = self.env_info[index]["z"]+( (vz_old+object_vz)/2*self.dt ) / params.dz
 					
 					if object_x < object_r + 10:
 						object_x = object_r + 10
@@ -659,8 +642,8 @@ class Dataset:
 					object_vx = vx_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					object_vz = vz_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_z = self.env_info[index]["z"]+(vz_old+object_vz)/2*self.dt
+					object_x = self.env_info[index]["x"]+( (vx_old+object_vx)/2*self.dt ) / params.dx
+					object_z = self.env_info[index]["z"]+( (vz_old+object_vz)/2*self.dt ) / params.dz
 					
 					if object_x < rod_size + 10:
 						object_x = rod_size + 10
@@ -681,8 +664,8 @@ class Dataset:
 					object_vx = max(min((self.mousex-self.env_info[index]["x"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					object_vz = max(min((self.mousez-self.env_info[index]["z"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_z = self.env_info[index]["z"]+(vz_old+object_vz)/2*self.dt
+					object_x = self.env_info[index]["x"]+( (vx_old+object_vx)/2*self.dt ) / params.dx
+					object_z = self.env_info[index]["z"]+( (vz_old+object_vz)/2*self.dt ) / params.dz
 					
 					if object_x < rod_size + 10:
 						object_x = rod_size + 10
@@ -731,8 +714,8 @@ class Dataset:
 					object_vx = vx_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					object_vy = vy_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_y = self.env_info[index]["y"]+(vy_old+object_vy)/2*self.dt
+					object_x = self.env_info[index]["x"]+( (vx_old+object_vx)/2*self.dt ) / params.dx
+					object_y = self.env_info[index]["y"]+( (vy_old+object_vy)/2*self.dt ) / params.dy
 					
 					if object_x < rod_size + 10:
 						object_x = rod_size + 10
@@ -753,8 +736,8 @@ class Dataset:
 					object_vx = max(min((self.mousex-self.env_info[index]["x"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					object_vy = max(min((self.mousey-self.env_info[index]["y"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_y = self.env_info[index]["y"]+(vy_old+object_vy)/2*self.dt
+					object_x = self.env_info[index]["x"]+( (vx_old+object_vx)/2*self.dt ) / params.dx
+					object_y = self.env_info[index]["y"]+( (vy_old+object_vy)/2*self.dt ) / params.dy
 					
 					if object_x < rod_size + 10:
 						object_x = rod_size + 10
@@ -808,9 +791,9 @@ class Dataset:
 					object_vy = vy_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					object_vz = vz_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_y = self.env_info[index]["y"]+(vy_old+object_vy)/2*self.dt
-					object_z = self.env_info[index]["z"]+(vz_old+object_vz)/2*self.dt
+					object_x = self.env_info[index]["x"]+((vx_old+object_vx)/2*self.dt)/params.dx
+					object_y = self.env_info[index]["y"]+((vy_old+object_vy)/2*self.dt)/params.dy
+					object_z = self.env_info[index]["z"]+((vz_old+object_vz)/2*self.dt)/params.dz
 					
 					if object_x < object_w + 10:
 						object_x = object_w + 10
@@ -839,9 +822,9 @@ class Dataset:
 					object_vy = max(min((self.mousey-self.env_info[index]["y"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					object_vz = max(min((self.mousez-self.env_info[index]["z"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_y = self.env_info[index]["y"]+(vy_old+object_vy)/2*self.dt
-					object_z = self.env_info[index]["z"]+(vz_old+object_vz)/2*self.dt
+					object_x = self.env_info[index]["x"]+((vx_old+object_vx)/2*self.dt)/params.dx
+					object_y = self.env_info[index]["y"]+((vy_old+object_vy)/2*self.dt)/params.dy
+					object_z = self.env_info[index]["z"]+((vz_old+object_vz)/2*self.dt)/params.dz
 					
 					if object_x < object_w + 10:
 						object_x = object_w + 10
@@ -889,143 +872,6 @@ class Dataset:
 				self.env_info[index]["vz"] = object_vz
 				self.env_info[index]["flow_v"] = flow_v
 				
-			if self.env_info[index]["type"] == "benchmark":
-				object_h = self.env_info[index]["h"]
-				object_w = self.env_info[index]["w"]
-				object_d = self.env_info[index]["d"]
-				
-				flow_v = self.env_info[index]["flow_v"]
-				object_vx = 0
-				object_vy = 0
-				object_vz = 0
-				
-				object_x = self.env_info[index]["x"]
-				object_y = self.env_info[index]["y"]
-				object_z = self.env_info[index]["z"]
-					
-					
-				self.cond_mask[index]=0
-				self.cond_mask[index,:,0:5,:,:]=1
-				self.cond_mask[index,:,(self.w-5):self.w,:,:]=1
-				self.cond_mask[index,:,:,0:3,:]=1
-				self.cond_mask[index,:,:,(self.h-3):self.h,:]=1
-				self.cond_mask[index,:,:,:,0:3]=1
-				self.cond_mask[index,:,:,:,(self.d-3):self.d]=1
-				
-				self.cond_mask[index,:,int(object_x-object_w):int(object_x+object_w),int(object_y-object_h):int(object_y+object_h),int(object_z-object_d):int(object_z+object_d)] = 1
-				self.v_cond[index,0,int(object_x-object_w):int(object_x+object_w),int(object_y-object_h):int(object_y+object_h),int(object_z-object_d):int(object_z+object_d)] = object_vx
-				self.v_cond[index,1,int(object_x-object_w):int(object_x+object_w),int(object_y-object_h):int(object_y+object_h),int(object_z-object_d):int(object_z+object_d)] = object_vy
-				self.v_cond[index,2,int(object_x-object_w):int(object_x+object_w),int(object_y-object_h):int(object_y+object_h),int(object_z-object_d):int(object_z+object_d)] = object_vz
-				
-				self.v_cond[index,0,0:5,10:(self.h-10),10:(self.d-10)]=flow_v
-				self.v_cond[index,0,(self.w-5):self.w,10:(self.h-10),10:(self.d-10)]=flow_v
-				self.v_cond[index] = self.v_cond[index]*self.cond_mask[index]
-				
-				self.env_info[index]["x"] = object_x
-				self.env_info[index]["y"] = object_y
-				self.env_info[index]["z"] = object_z
-				self.env_info[index]["vx"] = object_vx
-				self.env_info[index]["vy"] = object_vy
-				self.env_info[index]["vz"] = object_vz
-				self.env_info[index]["flow_v"] = flow_v
-				
-			if self.env_info[index]["type"] == "image":
-				image = self.env_info[index]["image"]
-				image_mask = img_dict[image]
-				w,h,d = image_mask.shape[1],image_mask.shape[2],image_mask.shape[3]
-				
-				object_w,object_h,object_d = w//2,h//2,d//2
-				vx_old = self.env_info[index]["vx"]
-				vy_old = self.env_info[index]["vy"]
-				vz_old = self.env_info[index]["vz"]
-				
-				if not self.interactive:
-					flow_v = self.env_info[index]["flow_v"]
-					object_vx = vx_old*self.brown_damping + self.brown_velocity*np.random.randn()
-					object_vy = vy_old*self.brown_damping + self.brown_velocity*np.random.randn()
-					object_vz = vz_old*self.brown_damping + self.brown_velocity*np.random.randn()
-					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_y = self.env_info[index]["y"]+(vy_old+object_vy)/2*self.dt
-					object_z = self.env_info[index]["z"]+(vz_old+object_vz)/2*self.dt
-					
-					if object_x < object_w + 10:
-						object_x = object_w + 10
-						object_vx = -object_vx
-					if object_x > self.w - object_w - 10:
-						object_x = self.w - object_w - 10
-						object_vx = -object_vx
-						
-					if object_y < object_h + 10:
-						object_y = object_h+10
-						object_vy = -object_vy
-					if object_y > self.h - object_h - 10:
-						object_y = self.h - object_h - 10
-						object_vy = -object_vy
-						
-					if object_z < object_d + 10:
-						object_z = object_d+10
-						object_vz = -object_vz
-					if object_z > self.d - object_d - 10:
-						object_z = self.d - object_d - 10
-						object_vz = -object_vz
-					
-				if self.interactive:
-					flow_v = self.mousev
-					object_vx = max(min((self.mousex-self.env_info[index]["x"])/self.interactive_spring,self.max_speed),-self.max_speed)
-					object_vy = max(min((self.mousey-self.env_info[index]["y"])/self.interactive_spring,self.max_speed),-self.max_speed)
-					object_vz = max(min((self.mousez-self.env_info[index]["z"])/self.interactive_spring,self.max_speed),-self.max_speed)
-					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_y = self.env_info[index]["y"]+(vy_old+object_vy)/2*self.dt
-					object_z = self.env_info[index]["z"]+(vz_old+object_vz)/2*self.dt
-					
-					if object_x < object_w + 10:
-						object_x = object_w + 10
-						object_vx = 0
-					if object_x > self.w - object_w - 10:
-						object_x = self.w - object_w - 10
-						object_vx = 0
-						
-					if object_y < object_h + 10:
-						object_y = object_h+10
-						object_vy = 0
-					if object_y > self.h - object_h - 10:
-						object_y = self.h - object_h - 10
-						object_vy = 0
-						
-					if object_z < object_d + 10:
-						object_z = object_d+10
-						object_vz = 0
-					if object_z > self.d - object_d - 10:
-						object_z = self.d - object_d - 10
-						object_vz = 0
-				
-				self.cond_mask[index]=0
-				self.cond_mask[index,:,0:5,:,:]=1
-				self.cond_mask[index,:,(self.w-5):self.w,:,:]=1
-				self.cond_mask[index,:,:,0:3,:]=1
-				self.cond_mask[index,:,:,(self.h-3):self.h,:]=1
-				self.cond_mask[index,:,:,:,0:3]=1
-				self.cond_mask[index,:,:,:,(self.d-3):self.d]=1
-				
-				self.cond_mask[index,:,int(object_x-w//2):int(object_x-w//2+w),int(object_y-h//2):int(object_y-h//2+h),int(object_z-d//2):int(object_z-d//2+d)] = image_mask
-				self.v_cond[index,0,int(object_x-w//2):int(object_x-w//2+w),int(object_y-h//2):int(object_y-h//2+h),int(object_z-d//2):int(object_z-d//2+d)] = object_vx
-				self.v_cond[index,1,int(object_x-w//2):int(object_x-w//2+w),int(object_y-h//2):int(object_y-h//2+h),int(object_z-d//2):int(object_z-d//2+d)] = object_vy
-				self.v_cond[index,2,int(object_x-w//2):int(object_x-w//2+w),int(object_y-h//2):int(object_y-h//2+h),int(object_z-d//2):int(object_z-d//2+d)] = object_vz
-				
-				self.v_cond[index,0,0:5,10:(self.h-10),10:(self.d-10)]=flow_v
-				self.v_cond[index,0,(self.w-5):self.w,10:(self.h-10),10:(self.d-10)]=flow_v
-				self.v_cond[index] = self.v_cond[index]*self.cond_mask[index]
-				
-				self.env_info[index]["x"] = object_x
-				self.env_info[index]["y"] = object_y
-				self.env_info[index]["z"] = object_z
-				self.env_info[index]["vx"] = object_vx
-				self.env_info[index]["vy"] = object_vy
-				self.env_info[index]["vz"] = object_vz
-				self.env_info[index]["flow_v"] = flow_v
-			
 			
 			if self.env_info[index]["type"] == "ball":
 				object_r = self.env_info[index]["r"]
@@ -1042,9 +888,9 @@ class Dataset:
 					object_vy = vy_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					object_vz = vz_old*self.brown_damping + self.brown_velocity*np.random.randn()
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_y = self.env_info[index]["y"]+(vy_old+object_vy)/2*self.dt
-					object_z = self.env_info[index]["z"]+(vz_old+object_vz)/2*self.dt
+					object_x = self.env_info[index]["x"]+((vx_old+object_vx)/2*self.dt)/params.dx
+					object_y = self.env_info[index]["y"]+((vy_old+object_vy)/2*self.dt)/params.dy
+					object_z = self.env_info[index]["z"]+((vz_old+object_vz)/2*self.dt)/params.dz
 					
 					if object_x < object_r + 10:
 						object_x = object_r + 10
@@ -1074,9 +920,9 @@ class Dataset:
 					object_vy = max(min((self.mousey-self.env_info[index]["y"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					object_vz = max(min((self.mousez-self.env_info[index]["z"])/self.interactive_spring,self.max_speed),-self.max_speed)
 					
-					object_x = self.env_info[index]["x"]+(vx_old+object_vx)/2*self.dt
-					object_y = self.env_info[index]["y"]+(vy_old+object_vy)/2*self.dt
-					object_z = self.env_info[index]["z"]+(vz_old+object_vz)/2*self.dt
+					object_x = self.env_info[index]["x"]+((vx_old+object_vx)/2*self.dt)/params.dx
+					object_y = self.env_info[index]["y"]+((vy_old+object_vy)/2*self.dt)/params.dy
+					object_z = self.env_info[index]["z"]+((vz_old+object_vz)/2*self.dt)/params.dz
 					
 					if object_x < object_r + 10:
 						object_x = object_r + 10
@@ -1136,7 +982,19 @@ class Dataset:
 				self.env_info[index]["wz"] = object_wz
 				self.env_info[index]["flow_v"] = flow_v
 			
-	
+			rho_profile = 1.225/( np.exp((np.arange(0,self.d,1)*params.dz)/params.scale_height) )
+
+			p_profile          = (params.sp)/( np.exp((np.arange(0,self.d,1)*params.dz)/params.scale_height) )
+			self.p_cond[index] = torch.from_numpy(np.broadcast_to(p_profile,(self.w,self.h,self.d)))
+			p_x                = np.linspace(1,-1,self.w) * flow_v * self.w * params.dx
+			p_X                = p_x.reshape(self.w, 1,1)
+			p_pur              = np.broadcast_to(p_X,(self.w,self.h,self.d))
+			self.p_cond[index] = self.p[index] + p_pur
+
+			T_profile          = (273.15 + 15) - (10./1000.)*(np.arange(0,self.d,1)*params.dz)
+			self.T_cond[index] = torch.from_numpy(np.broadcast_to(T_profile,(self.w,self.h,self.d)))
+			self.T_cond[index] = self.T[index] + p_pur/(rho_profile*params.R)
+
 	def ask(self):
 		"""
 		sample and update environemts
@@ -1149,16 +1007,15 @@ class Dataset:
 		if self.interactive:
 			self.mousev = min(max(self.mousev,-self.max_speed),self.max_speed)
 			self.mousew = min(max(self.mousew,-self.max_speed),self.max_speed)
-			self.mousemu[0] = min(max(self.mousemu.clone(),np.exp(self.mu_range[0])),np.exp(self.mu_range[1]))
-			self.mouserho[0] = min(max(self.mouserho.clone(),np.exp(self.rho_range[0])),np.exp(self.rho_range[1]))
 		
 		self.indices = np.random.choice(self.dataset_size,self.batch_size)
 		self.update_envs(self.indices)
-		return self.v_cond[self.indices],self.cond_mask[self.indices],self.a[self.indices],self.p[self.indices],self.mu[self.indices],self.rho[self.indices]
+		return self.v_cond[self.indices], self.p_cond[self.indices], self.T_cond[self.indices], self.cond_mask[self.indices], self.bc_mask[self.indices], self.v[self.indices], self.p[self.indices],self.T[self.indices]
 	
-	def tell(self,a,p):
-		self.a[self.indices] = a.detach()
-		self.p[self.indices] = p.detach()
+	def tell(self,v,p,T):
+		self.v[self.indices]   = v.detach()
+		self.p[self.indices]   = p.detach()
+		self.T[self.indices]   = T.detach()
 		
 		self.t += 1
 		if self.t % (self.average_sequence_length/self.batch_size) == 0:#ca x*batch_size steps until env gets reset

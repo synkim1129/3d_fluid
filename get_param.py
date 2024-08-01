@@ -21,19 +21,20 @@ def params():
 	# Training parameters
 	parser.add_argument('--net', default="UNet", type=str, help='network to train', choices=["UNet","pruned_UNet"])
 	parser.add_argument('--n_epochs', default=1500, type=int, help='number of epochs (after each epoch, the model gets saved)')
-	parser.add_argument('--hidden_size', default=15, type=int, help='hidden size of network (default: 15)')
+	parser.add_argument('--hidden_size', default=20, type=int, help='hidden size of network (default: 15)')
 	parser.add_argument('--n_batches_per_epoch', default=1000, type=int, help='number of batches per epoch (default: 1000)')
 	parser.add_argument('--batch_size', default=10, type=int, help='batch size (default: 10)')
 	parser.add_argument('--average_sequence_length', default=5000, type=int, help='average sequence length in dataset (default: 5000)')
 	parser.add_argument('--dataset_size', default=1000, type=int, help='size of dataset (default: 1000)')
 	parser.add_argument('--cuda', default=True, type=str2bool, help='use GPU')
-	parser.add_argument('--loss_bound', default=1, type=float, help='loss factor for boundary conditions')
-	parser.add_argument('--loss_border', default=20, type=float, help='loss factor for extra weight on boundary borders')
-	parser.add_argument('--loss_cont', default=50, type=float, help='loss factor for continuity equation')
-	parser.add_argument('--loss_nav', default=1, type=float, help='loss factor for navier stokes equations')
-	parser.add_argument('--loss_rho', default=10, type=float, help='loss factor for keeping rho fixed')
-	parser.add_argument('--loss_mean_a', default=0, type=float, help='loss factor to keep mean of a around 0')
-	parser.add_argument('--loss_mean_p', default=0, type=float, help='loss factor to keep mean of p around 0')
+
+	parser.add_argument('--loss_bound'  , default=1  , type=float, help='loss factor for boundary conditions')
+	parser.add_argument('--loss_border' , default=20 , type=float, help='loss factor for extra weight on boundary borders')
+	parser.add_argument('--loss_nav'    , default=1  , type=float, help='loss factor for navier stokes equations')
+	parser.add_argument('--loss_rho'    , default=10 , type=float, help='loss factor for keeping rho fixed')
+	parser.add_argument('--loss_mean_a' , default=0  , type=float, help='loss factor to keep mean of a around 0')
+	parser.add_argument('--loss_mean_p' , default=0,   type=float, help='loss factor to keep mean of p around 0')
+
 	parser.add_argument('--regularize_grad_p', default=0, type=float, help='regularizer for gradient of p. evt needed for very high reynolds numbers (default: 0)')
 	parser.add_argument('--max_speed', default=1, type=float, help='max speed for boundary conditions in dataset (default: 1)')
 	parser.add_argument('--lr', default=0.001, type=float, help='learning rate of optimizer (default: 0.001)')
@@ -55,17 +56,33 @@ def params():
 	parser.add_argument('--depth', default=64, type=int, help='setup depth')
 	
 	# Fluid parameters
-	parser.add_argument('--rho_min', default=0.1, type=float, help='min of fluid density rho (default 0.1)')
-	parser.add_argument('--rho_max', default=15, type=float, help='max of fluid density rho (default 15)')
-	parser.add_argument('--mu_min', default=0.01, type=float, help='min of fluid viscosity mu (default 0.01)')
-	parser.add_argument('--mu_max', default=8, type=float, help='max of fluid viscosity mu (default 8)')
-	parser.add_argument('--dt', default=1, type=float, help='timestep of fluid integrator')
+	parser.add_argument('--rho', default=1.19, type=float, help='min of fluid density rho (default 0.1)')
+	parser.add_argument('--dt',  default=1   , type=float, help='timestep of fluid integrator')
 	
 	# Load parameters
 	parser.add_argument('--load_date_time', default=None, type=str, help='date_time of run to load (default: None)')
 	parser.add_argument('--load_index', default=None, type=int, help='index of run to load (default: None)')
 	parser.add_argument('--load_optimizer', default=False, type=str2bool, help='load state of optimizer (default: True)')
 	parser.add_argument('--load_latest', default=False, type=str2bool, help='load latest version for training (if True: leave load_date_time and load_index None. default: False)')
+
+	#{{{ added
+	parser.add_argument('--dx', default=50, type=float, help='x interval')
+	parser.add_argument('--dy', default=50, type=float, help='y interval')
+	parser.add_argument('--dz', default=50, type=float, help='z interval')
+
+	parser.add_argument('--f'           , default=1e-4   , type=float, help='coriolis force at mid latitude')
+	parser.add_argument('--g'           , default=9.8    , type=float, help='gravity')
+	parser.add_argument('--R'           , default=287    , type=float, help='specific gas constant')
+	parser.add_argument('--cp'          , default=1005   , type=float, help='specific heat at constant pressure')
+	parser.add_argument('--cv'          , default=718    , type=float, help='specific heat at constant volume')
+	parser.add_argument('--sp'          , default=101300 , type=float, help='serface pressure')
+	parser.add_argument('--scale_height', default=8500   , type=float, help='scale height for p')
+	parser.add_argument('--mu'          ,  default=1     , type=float, help='min of fluid viscosity mu (default 0.01)')
+
+	parser.add_argument('--loss_mass'   , default=50 , type=float, help='loss factor for continuity equation')
+	parser.add_argument('--loss_thermal', default=1, type=float, help='loss factor for navier thermodynamics equations')
+	#}}}
+
 	
 	# parse parameters
 	params = parser.parse_args()

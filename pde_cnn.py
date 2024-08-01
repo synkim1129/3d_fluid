@@ -40,8 +40,8 @@ class PDE_UNet(nn.Module):
 	def __init__(self, hidden_size):
 		super(PDE_UNet, self).__init__()
 		
-		self.in_dim = 16+2
-		self.out_dim = 4
+		self.in_dim = 18
+		self.out_dim = 5
 		self.num_filters = hidden_size
 		activation = nn.LeakyReLU(0.2, inplace=True)
 		
@@ -77,12 +77,17 @@ class PDE_UNet(nn.Module):
 		self.out = nn.Conv3d(self.num_filters, self.out_dim, kernel_size=3, stride=1, padding=1)
 		self.out_bn = nn.BatchNorm3d(self.out_dim)
 
-	def forward(self,a_old,p_old,v_cond,mask_cond,mu,rho):
-		mask_flow = 1-mask_cond
-		v_old = rot_mac(a_old)#this could be probably learned rather easily (evtl not needed)
+	def forward(self,v_cond,p_cond,T_cond,cond_mask,bc_mask,v_old,p_old,T_old):
+		mask_flow = 1 - cond_mask
 		ones = toCuda(torch.ones(p_old.shape))
-		x = torch.cat([p_old,a_old,v_old,mask_flow,v_cond*mask_cond,mask_cond,mask_flow*p_old,mask_flow*v_old,torch.log(mu)*ones,torch.log(rho)*ones],dim=1)
-		#1+3+3+1+3+1+1+3=16
+		x = torch.cat([v_old, p_old, T_old,\
+                       mask_flow, cond_mask, bc_mask,\
+                       v_cond*cond_mask, p_cond*bc_mask, T_cond*bc_mask,\
+                       mask_flow*v_old, mask_flow*p_old, mask_flow*T_old],dim=1)
+		#3+1+1+
+		#1+1+1+
+		#3+1+1+
+		#3+1+1 = 18 
 		
 		# Down sampling
 		down_1 = self.down_1(x) # -> [1, 4, 128, 128, 128]
@@ -127,12 +132,20 @@ class PDE_UNet(nn.Module):
 		# Output
 		out = self.out_bn(self.out(up_5)) # -> [1, 4, 128, 128, 128]
 		
-		a_new, p_new = 400*torch.tanh((a_old+out[:,0:3])/400), 10*torch.tanh((p_old+out[:,3:4])/10)
+		m = nn.ReLU()
+		v_new, p_new,T_new =    10*torch.tanh((v_old+out[:,0:3])/10), \
+                            70000*torch.tanh((p_old+out[:,3:4])/70000) + 75000, \
+                              150*torch.tanh((T_old+out[:,4:5])/150) + 273,
+
+#		v_new, p_new,T_new =  v_old + out[:,0:3], \
+#                           m(p_old + out[:,3:4]) + 1e-6, \
+#                           m(T_old + out[:,4:5]) + 1e-6
 		
-		p_new.data = (p_new.data-torch.mean(p_new.data,dim=(1,2,3,4)).unsqueeze(1).unsqueeze(2).unsqueeze(3).unsqueeze(4)) # normalize pressure # This should be part of the model!
-		a_new.data = (a_new.data-torch.mean(a_new.data,dim=(2,3,4)).unsqueeze(2).unsqueeze(3).unsqueeze(4)) # normalize a
+		#p_new.data = (p_new.data-torch.mean(p_new.data,dim=(1,2,3,4)).unsqueeze(1).unsqueeze(2).unsqueeze(3).unsqueeze(4)) # normalize pressure # This should be part of the model!
+		#v_new.data = (v_new.data-torch.mean(v_new.data,dim=(2,3,4)).unsqueeze(2).unsqueeze(3).unsqueeze(4)) 
+		#T_new.data = (T_new.data-torch.mean(T_new.data,dim=(1,2,3,4)).unsqueeze(1).unsqueeze(2).unsqueeze(3).unsqueeze(4)) 
 		
-		return a_new,p_new
+		return v_new,p_new,T_new
 
 
 class PDE_pruned_UNet(nn.Module):
@@ -203,7 +216,7 @@ class PDE_pruned_UNet(nn.Module):
 		# Output
 		out = self.out_bn(self.out(up_3))
 		
-		a_new, p_new = 400*torch.tanh((a_old+out[:,0:3])/400), 10*torch.tanh((p_old+out[:,3:4])/10)
+		a_new, p_new = 4e7*torch.tanh((a_old+out[:,0:3])/4e7), 1e4*torch.tanh((p_old+out[:,3:4])/1e4)
 		
 		p_new.data = (p_new.data-torch.mean(p_new.data,dim=(1,2,3,4)).unsqueeze(1).unsqueeze(2).unsqueeze(3).unsqueeze(4)) # normalize pressure # This should be part of the model!
 		a_new.data = (a_new.data-torch.mean(a_new.data,dim=(2,3,4)).unsqueeze(2).unsqueeze(3).unsqueeze(4)) # normalize a

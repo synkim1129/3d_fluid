@@ -242,14 +242,6 @@ class Logger():
 		
 		return datetime, index
 
-	def save_params_to_file(self, params):
-		os.makedirs('Logger/{}/{}'.format(self.name,self.datetime),exist_ok=True)
-		filename = 'Logger/{}/{}/params.txt'.format(self.name,self.datetime)
-		with open(filename, 'w') as f:
-			f.write(f'{self.name}, {self.datetime}\n')
-			for key, value in vars(params).items():
-				f.write(f'{key}: {value}\n')
-
 
 t_start = 0
 

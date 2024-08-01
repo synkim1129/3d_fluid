@@ -76,7 +76,6 @@ cv2.setMouseCallback("p xy",mousePosition_xy)
 cv2.setMouseCallback("p xz",mousePosition_xz)
 cv2.setMouseCallback("p yz",mousePosition_yz)
 
-
 last_FPS = 0
 quit = False
 vtk_iteration = 0
@@ -89,11 +88,64 @@ animation_freq = 45
 animation_type = "sin"#"triangle"#
 aggregator = "mean"# "max"#
 
+mknc = True#False#
+
+if mknc:
+	from netCDF4 import Dataset as datas	
+
+	outf = datas("test_dt4.nc",mode="w",format="NETCDF4")
+
+	tdim = outf.createDimension("time",None)
+	to   = outf.createVariable("time",np.int32,("time",))
+	to.long_name = "time"
+
+	zdim = outf.createDimension("z",params.depth)
+	zo   = outf.createVariable("z",np.int32,("z",))
+	zo.long_name = "height"
+	zo.units = "m"
+	zo[:] = np.arange(params.depth)*params.dz
+
+	ydim = outf.createDimension("y",params.height)
+	yo   = outf.createVariable("y",np.int32,("y",))
+	yo.long_name = "y_grid"
+	yo.units = "m"
+	yo[:] = np.arange(params.height)*params.dy
+
+	xdim = outf.createDimension("x",params.width)
+	xo   = outf.createVariable("x",np.int32,("x",))
+	xo.long_name = "x_grid"
+	xo.units = "m"
+	xo[:] = np.arange(params.width)*params.dx
+
+	uo = outf.createVariable("u",np.float32,("time","x","y","z",))
+	uo.long_name = "x_direction_speed"
+	uo.units = "m/s"
+
+	vo = outf.createVariable("v",np.float32,("time","x","y","z",))
+	vo.long_name = "y_direction_speed"
+	vo.units = "m/s"
+
+	wo = outf.createVariable("w",np.float32,("time","x","y","z",))
+	wo.long_name = "z_direction_speed"
+	wo.units = "m/s"
+
+	po = outf.createVariable("p",np.float32,("time","x","y","z",))
+	po.long_name = "pressure"
+	po.units = "Pa"
+
+	To = outf.createVariable("T",np.float32,("time","x","y","z",))
+	To.long_name = "Temperature"
+	To.units = "K"
+
+	rhoo = outf.createVariable("rho",np.float32,("time","x","y","z",))
+	rhoo.long_name = "density"
+	rhoo.units = "kg / m**3"
+
 with torch.no_grad():
 	while True:
 		
 		# initialize dataset
-		dataset = Dataset(params.width,params.height,params.depth,1,1,interactive=True,average_sequence_length=params.average_sequence_length,max_speed=params.max_speed,dt=params.dt,types=["image","magnus_y","moving_rod_y","ball"],images=["fish","cyber","3_objects"],mu_range=[params.mu_min,params.mu_max],rho_range=[params.rho_min,params.rho_max])
+		dataset = Dataset(params.width,params.height,params.depth,1,1,interactive=True,average_sequence_length=params.average_sequence_length,max_speed=params.max_speed,dt=params.dt,types=["ball"],images=["fish","cyber","3_objects"],mu=params.mu)
 		# options for setup types: "magnus_y","magnus_z","no_box","rod_y","rod_z","moving_rod_y","moving_rod_z","box","benchmark","image","ball"
 		# options for images: "submarine","fish","cyber","wing","2_objects","3_objects"
 		
@@ -105,15 +157,35 @@ with torch.no_grad():
 		for t in range(params.average_sequence_length):
 			
 			# get dirichlet boundary conditions, fluid domain, vector potential (streamfunction), pressure field, mu, rho from dataset:
-			v_cond,cond_mask,a_old,p_old,mu,rho = toCuda(dataset.ask())
+			v_cond,p_cond,T_cond,cond_mask,bc_mask,v_old,p_old,T_old = toCuda(dataset.ask())
 			
 			v_cond = d.normal2staggered(v_cond) # map dirichlet boundary conditions onto staggered grid
 			
-			a_new,p_new = pde_cnn(a_old,p_old,v_cond,cond_mask,mu,rho) # apply fluid model on fluid state and boundary conditions
+			#v_in   = (v_old-torch.mean(v_old,dim=(2,3,4)).unsqueeze(2).unsqueeze(3).unsqueeze(4))
+			#p_in   = (p_old-torch.mean(p_old,dim=(1,2,3,4)).unsqueeze(1).unsqueeze(2).unsqueeze(3).unsqueeze(4))
+			#T_in   = (T_old-torch.mean(T_old,dim=(1,2,3,4)).unsqueeze(1).unsqueeze(2).unsqueeze(3).unsqueeze(4))
+
+			v_in = v_old
+			p_in = p_old
+			T_in = T_old
+
+			v_new,p_new,T_new = pde_cnn(v_cond,p_cond,T_cond,cond_mask,bc_mask,v_in,p_in,T_in)
+
+			rho_new = p_new / (params.R * T_new)
 			
-			dataset.tell(toCpu(a_new),toCpu(p_new)) # update dataset with new predicted fluid state
-			
+			dataset.tell(toCpu(v_new),toCpu(p_new),toCpu(T_new))
+
 			# End: fluid simulation loop
+
+			if mknc:
+				uo[t,:,:,:] = v_new[0,0,:,:,:].cpu().numpy()
+				vo[t,:,:,:] = v_new[0,1,:,:,:].cpu().numpy()
+				wo[t,:,:,:] = v_new[0,2,:,:,:].cpu().numpy()
+				po[t,:,:,:] = p_new[0,0,:,:,:].cpu().numpy()
+				#po[t,:,:,:] = p_cond[0,0,:,:,:].cpu().numpy()
+				To[t,:,:,:] = T_new[0,0,:,:,:].cpu().numpy()
+				#To[t,:,:,:] = T_cond[0,0,:,:,:].cpu().numpy()
+				rhoo[t,:,:,:] = rho_new[0,0,:,:,:].cpu().numpy()
 			
 			# Visualization Code:
 			if t%1==0:
@@ -124,7 +196,7 @@ with torch.no_grad():
 				
 				# show velocity field
 				
-				v_new = d.staggered2normal(flow_mask_mac*d.rot_mac(a_new)+cond_mask_mac*v_cond)[:,:,1:-1,1:-1,1:-1]
+				v_new = d.staggered2normal(v_new+cond_mask_mac*v_cond)[:,:,1:-1,1:-1,1:-1]
 				
 				if aggregator == "mean":
 					vector = (v_new[0])[(0,1),].mean(3).clone()
@@ -179,10 +251,10 @@ with torch.no_grad():
 				p = toCpu(p).unsqueeze(2).repeat(1,1,3).numpy()
 				cv2.imshow('p yz',p)
 				
-				divergence_v = d.div(flow_mask_mac*d.rot_mac(a_new)+cond_mask_mac*v_cond)[:,:,1:-1,1:-1,1:-1]
+				#divergence_v = d.div(flow_mask_mac*v_new+cond_mask_mac*v_cond)[:,:,1:-1,1:-1,1:-1]
 				
-				print(f"FPS: {last_FPS}; E[|div(v)|] = {torch.mean(torch.abs(divergence_v))}; E[div(v)^2] = {torch.mean(divergence_v**2)}")
-				print(f"mu: {dataset.mousemu.numpy()[0,0,0,0]}; rho: {dataset.mouserho.numpy()[0,0,0,0]}; v: {dataset.mousev}")
+				#print(f"FPS: {last_FPS}; E[|div(v)|] = {torch.mean(torch.abs(divergence_v))}; E[div(v)^2] = {torch.mean(divergence_v**2)}")
+				#print(f"mu: {dataset.mousemu.numpy()[0,0,0,0]}; rho: {dataset.mouserho.numpy()[0,0,0,0]}; v: {dataset.mousev}")
 				
 				key = cv2.waitKey(1)
 				

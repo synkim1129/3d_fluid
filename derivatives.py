@@ -7,43 +7,43 @@ from get_param import params,toCuda,toCpu
 
 dx_kernel = toCuda(torch.Tensor([-0.5,0,0.5]).unsqueeze(0).unsqueeze(1).unsqueeze(3).unsqueeze(4))
 def dx(v):
-	return F.conv3d(v,dx_kernel,padding=(1,0,0))
+	return F.conv3d(v,dx_kernel,padding=(1,0,0)) / params.dx
 
 dy_kernel = toCuda(torch.Tensor([-0.5,0,0.5]).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4))
 def dy(v):
-	return F.conv3d(v,dy_kernel,padding=(0,1,0))
+	return F.conv3d(v,dy_kernel,padding=(0,1,0)) / params.dy
 
 dz_kernel = toCuda(torch.Tensor([-0.5,0,0.5]).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(3))
 def dz(v):
-	return F.conv3d(v,dz_kernel,padding=(0,0,1))
+	return F.conv3d(v,dz_kernel,padding=(0,0,1)) / params.dz
 
 # dx/dy/dz "minus" half a voxel shifted
 
 dx_m_kernel = toCuda(torch.Tensor([-1,1,0]).unsqueeze(0).unsqueeze(1).unsqueeze(3).unsqueeze(4))
 def dx_m(v):
-	return F.conv3d(v,dx_m_kernel,padding=(1,0,0))
+	return F.conv3d(v,dx_m_kernel,padding=(1,0,0)) / params.dx
 
 dy_m_kernel = toCuda(torch.Tensor([-1,1,0]).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4))
 def dy_m(v):
-	return F.conv3d(v,dy_m_kernel,padding=(0,1,0))
+	return F.conv3d(v,dy_m_kernel,padding=(0,1,0)) / params.dy
 
 dz_m_kernel = toCuda(torch.Tensor([-1,1,0]).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(3))
 def dz_m(v):
-	return F.conv3d(v,dz_m_kernel,padding=(0,0,1))
+	return F.conv3d(v,dz_m_kernel,padding=(0,0,1)) / params.dz
 
 # dx/dy/dz "plus" half a voxel shifted
 
 dx_p_kernel = toCuda(torch.Tensor([0,-1,1]).unsqueeze(0).unsqueeze(1).unsqueeze(3).unsqueeze(4))
 def dx_p(v):
-	return F.conv3d(v,dx_p_kernel,padding=(1,0,0))
+	return F.conv3d(v,dx_p_kernel,padding=(1,0,0)) / params.dx
 
 dy_p_kernel = toCuda(torch.Tensor([0,-1,1]).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4))
 def dy_p(v):
-	return F.conv3d(v,dy_p_kernel,padding=(0,1,0))
+	return F.conv3d(v,dy_p_kernel,padding=(0,1,0)) / params.dy
 
 dz_p_kernel = toCuda(torch.Tensor([0,-1,1]).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(3))
 def dz_p(v):
-	return F.conv3d(v,dz_p_kernel,padding=(0,0,1))
+	return F.conv3d(v,dz_p_kernel,padding=(0,0,1)) / params.dz
 
 
 # mean x/y/z "minus" half a voxel shifted
@@ -132,7 +132,7 @@ def map_vy2vz_m(v):
 #laplace_kernel = toCuda(torch.Tensor([[[0,0,0],[0,1,0],[0,0,0]],[[0,1,0],[1,-6,1],[0,1,0]],[[0,0,0],[0,1,0],[0,0,0]]]).unsqueeze(0).unsqueeze(1))# 7 point stencil
 laplace_kernel = toCuda(1/26*torch.Tensor([[[2,3,2],[3,6,3],[2,3,2]],[[3,6,3],[6,-88,6],[3,6,3]],[[2,3,2],[3,6,3],[2,3,2]]]).unsqueeze(0).unsqueeze(1))# 27 point stencil
 def laplace(v):
-	return F.conv3d(v,laplace_kernel,padding=(1,1,1))
+	return F.conv3d(v,laplace_kernel,padding=(1,1,1)) / (params.dx**2)
 
 
 # staggered: MAC grid
