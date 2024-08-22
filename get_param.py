@@ -21,7 +21,7 @@ def params():
 	# Training parameters
 	parser.add_argument('--net', default="UNet", type=str, help='network to train', choices=["UNet","pruned_UNet"])
 	parser.add_argument('--n_epochs', default=1500, type=int, help='number of epochs (after each epoch, the model gets saved)')
-	parser.add_argument('--hidden_size', default=20, type=int, help='hidden size of network (default: 15)')
+	parser.add_argument('--hidden_size', default=30, type=int, help='hidden size of network (default: 15)')
 	parser.add_argument('--n_batches_per_epoch', default=1000, type=int, help='number of batches per epoch (default: 1000)')
 	parser.add_argument('--batch_size', default=10, type=int, help='batch size (default: 10)')
 	parser.add_argument('--average_sequence_length', default=5000, type=int, help='average sequence length in dataset (default: 5000)')
@@ -70,17 +70,18 @@ def params():
 	parser.add_argument('--dy', default=50, type=float, help='y interval')
 	parser.add_argument('--dz', default=50, type=float, help='z interval')
 
-	parser.add_argument('--f'           , default=1e-4   , type=float, help='coriolis force at mid latitude')
-	parser.add_argument('--g'           , default=9.8    , type=float, help='gravity')
-	parser.add_argument('--R'           , default=287    , type=float, help='specific gas constant')
-	parser.add_argument('--cp'          , default=1005   , type=float, help='specific heat at constant pressure')
-	parser.add_argument('--cv'          , default=718    , type=float, help='specific heat at constant volume')
-	parser.add_argument('--sp'          , default=101300 , type=float, help='serface pressure')
-	parser.add_argument('--scale_height', default=8500   , type=float, help='scale height for p')
-	parser.add_argument('--mu'          ,  default=1     , type=float, help='min of fluid viscosity mu (default 0.01)')
+	parser.add_argument('--f'           , default=1e-4    , type=float, help='coriolis force at mid latitude')
+	parser.add_argument('--g'           , default=9.8     , type=float, help='gravity')
+	parser.add_argument('--R'           , default=287.    , type=float, help='specific gas constant')
+	parser.add_argument('--cp'          , default=1005.   , type=float, help='specific heat at constant pressure')
+	parser.add_argument('--cv'          , default=718.    , type=float, help='specific heat at constant volume')
+	parser.add_argument('--sp'          , default=101300. , type=float, help='serface pressure')
+	parser.add_argument('--scale_height', default=8500.   , type=float, help='scale height for p')
+	#parser.add_argument('--mu'          ,  default=1.    , type=float, help='min of fluid viscosity mu (default 0.01)') mu org
+	parser.add_argument('--mu'          ,  default=1.789e-5     , type=float, help='min of fluid viscosity mu (default 0.01)')
 
-	parser.add_argument('--loss_mass'   , default=50 , type=float, help='loss factor for continuity equation')
-	parser.add_argument('--loss_thermal', default=1, type=float, help='loss factor for navier thermodynamics equations')
+	parser.add_argument('--loss_mass'   , default=50      , type=float, help='loss factor for continuity equation')
+	parser.add_argument('--loss_thermal', default=1       , type=float, help='loss factor for navier thermodynamics equations')
 	#}}}
 
 	

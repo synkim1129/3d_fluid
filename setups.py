@@ -982,18 +982,13 @@ class Dataset:
 				self.env_info[index]["wz"] = object_wz
 				self.env_info[index]["flow_v"] = flow_v
 			
-			rho_profile = 1.225/( np.exp((np.arange(0,self.d,1)*params.dz)/params.scale_height) )
+			#rho_profile = 1.225/( np.exp((np.arange(0,self.d,1)*params.dz)/params.scale_height) )
 
-			p_profile          = (params.sp)/( np.exp((np.arange(0,self.d,1)*params.dz)/params.scale_height) )
-			self.p_cond[index] = torch.from_numpy(np.broadcast_to(p_profile,(self.w,self.h,self.d)))
-			p_x                = np.linspace(1,-1,self.w) * flow_v * self.w * params.dx
-			p_X                = p_x.reshape(self.w, 1,1)
-			p_pur              = np.broadcast_to(p_X,(self.w,self.h,self.d))
-			self.p_cond[index] = self.p[index] + p_pur
+			#p_profile          = (params.sp)/( np.exp((np.arange(0,self.d,1)*params.dz)/params.scale_height) )
+			#self.p_cond[index] = torch.from_numpy(np.broadcast_to(p_profile,(self.w,self.h,self.d)))
 
-			T_profile          = (273.15 + 15) - (10./1000.)*(np.arange(0,self.d,1)*params.dz)
-			self.T_cond[index] = torch.from_numpy(np.broadcast_to(T_profile,(self.w,self.h,self.d)))
-			self.T_cond[index] = self.T[index] + p_pur/(rho_profile*params.R)
+			#T_profile          = (273.15 + 15) - (10./1000.)*(np.arange(0,self.d,1)*params.dz)
+			#self.T_cond[index] = torch.from_numpy(np.broadcast_to(T_profile,(self.w,self.h,self.d)))
 
 	def ask(self):
 		"""

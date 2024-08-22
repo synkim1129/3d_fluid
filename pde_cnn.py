@@ -4,6 +4,8 @@ from derivatives import rot_mac
 import torch.nn.functional as F
 from derivatives import toCuda,toCpu
 
+#torch.set_default_dtype(torch.float64)
+
 def get_Net(params):
 	if params.net == "UNet":
 		pde_cnn = PDE_UNet(params.hidden_size)
@@ -133,10 +135,12 @@ class PDE_UNet(nn.Module):
 		out = self.out_bn(self.out(up_5)) # -> [1, 4, 128, 128, 128]
 		
 		m = nn.ReLU()
-		v_new, p_new,T_new =    10*torch.tanh((v_old+out[:,0:3])/10), \
-                            70000*torch.tanh((p_old+out[:,3:4])/70000) + 75000, \
-                              150*torch.tanh((T_old+out[:,4:5])/150) + 273,
+		v_new, p_new,T_new =    5*torch.tanh((v_old+out[:,0:3])/5), \
+                                             m(p_old + out[:,3:4]) + 1e-6, \
+                                             m(T_old + out[:,4:5]) + 1e-6
 
+                            # 50000*torch.tanh((p_old+out[:,3:4])/50000) + 55000,\
+                            #  150*torch.tanh((T_old+out[:,4:5])/150) + 273,
 #		v_new, p_new,T_new =  v_old + out[:,0:3], \
 #                           m(p_old + out[:,3:4]) + 1e-6, \
 #                           m(T_old + out[:,4:5]) + 1e-6
