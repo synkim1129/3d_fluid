@@ -49,6 +49,8 @@ def params():
 	parser.add_argument('--integrator', default='imex', type=str, help='integration scheme (explicit / implicit / imex) (default: imex)',choices=['explicit','implicit','imex'])
 	parser.add_argument('--loss', default='square', type=str, help='loss type to train network (default: square)',choices=['square','abs','log_square','exp_square'])
 	parser.add_argument('--loss_multiplier', default=1, type=float, help='multiply loss / gradients (default: 1)')
+ 
+	parser.add_argument('--v_act', default='tanh', type=str, help='activation function for velocity (default: tanh)',choices=['tanh','relu','lrelu'])
 	
 	# Setup parameters
 	parser.add_argument('--width', default=128, type=int, help='setup width')
