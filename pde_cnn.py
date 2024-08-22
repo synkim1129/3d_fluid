@@ -150,10 +150,10 @@ class AdaptiveActivation(nn.Module):
 		super(AdaptiveActivation, self).__init__()
 		
 		# 학습 가능한 파라미터 초기화
-		self.a = nn.Parameter(torch.ones(out_channels))
-		self.b = nn.Parameter(torch.ones(out_channels))
-		self.c = nn.Parameter(torch.zeros(out_channels))
-		self.d = nn.Parameter(torch.zeros(out_channels))
+		self.a = nn.Parameter(torch.ones(1, out_channels, 1, 1, 1))
+		self.b = nn.Parameter(torch.ones(1, out_channels, 1, 1, 1))
+		self.c = nn.Parameter(torch.zeros(1, out_channels, 1, 1, 1))
+		self.d = nn.Parameter(torch.zeros(1, out_channels, 1, 1, 1))
 		
 		# 활성화 함수 선택
 		if activation_type == 'tanh':
