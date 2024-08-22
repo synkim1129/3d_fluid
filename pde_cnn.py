@@ -8,12 +8,14 @@ from derivatives import toCuda,toCpu
 
 def get_Net(params):
 	if params.net == "UNet":
+		pde_cnn = PDE_UNet(params.hidden_size)
+	if params.net == "UNet_Ad":
 		if params.v_act == "tanh":
-			pde_cnn = PDE_UNet(params.hidden_size, v_activation_type='tanh')
+			pde_cnn = PDE_UNet_Ad(params.hidden_size, v_activation_type='tanh')
 		elif params.v_act == "relu":
-			pde_cnn = PDE_UNet(params.hidden_size, v_activation_type='relu')
+			pde_cnn = PDE_UNet_Ad(params.hidden_size, v_activation_type='relu')
 		elif params.v_act == "lrelu":
-			pde_cnn = PDE_UNet(params.hidden_size, v_activation_type='lrelu')
+			pde_cnn = PDE_UNet_Ad(params.hidden_size, v_activation_type='lrelu')
 	if params.net == "pruned_UNet":
 		pde_cnn = PDE_pruned_UNet(params.hidden_size)
 	return pde_cnn
@@ -42,34 +44,135 @@ def conv_block_2_3d(in_dim, out_dim, activation):
 		nn.Conv3d(out_dim, out_dim, kernel_size=3, stride=1, padding=1),
 		nn.BatchNorm3d(out_dim),)
  
-class AdaptiveActivation(nn.Module):
-    def __init__(self, out_channels, activation_type='tanh'):
-        super(AdaptiveActivation, self).__init__()
-        
-        # 학습 가능한 파라미터 초기화
-        self.a = nn.Parameter(torch.ones(out_channels))
-        self.b = nn.Parameter(torch.ones(out_channels))
-        self.c = nn.Parameter(torch.zeros(out_channels))
-        self.d = nn.Parameter(torch.zeros(out_channels))
-        
-        # 활성화 함수 선택
-        if activation_type == 'tanh':
-            self.activation = torch.tanh
-        elif activation_type == 'relu':
-            self.activation = nn.ReLU()
-        elif activation_type == 'lrelu':
-            self.activation = nn.LeakyReLU(0.1, inplace=True)
-        else:
-            raise ValueError("activation_type must be either 'tanh', 'relu', or 'lrelu'")
-        
-    def forward(self, x):
-        # a * f(b * x + c) + d 계산
-        x = self.b * x + self.c  # b * x + c
-        x = self.activation(x)  # f_m(b * x + c)
-        x = self.a * x + self.d  # a * f_m(b * x + c) + d
-        return x
-
 class PDE_UNet(nn.Module):
+	def __init__(self, hidden_size):
+		super(PDE_UNet, self).__init__()
+		
+		self.in_dim = 18
+		self.out_dim = 5
+		self.num_filters = hidden_size
+		activation = nn.LeakyReLU(0.2, inplace=True)
+		
+		# Down sampling
+		self.down_1 = conv_block_2_3d(self.in_dim, self.num_filters, activation)
+		self.pool_1 = max_pooling_3d()
+		self.down_2 = conv_block_2_3d(self.num_filters, self.num_filters * 2, activation)
+		self.pool_2 = max_pooling_3d()
+		self.down_3 = conv_block_2_3d(self.num_filters * 2, self.num_filters * 4, activation)
+		self.pool_3 = max_pooling_3d()
+		self.down_4 = conv_block_2_3d(self.num_filters * 4, self.num_filters * 8, activation)
+		self.pool_4 = max_pooling_3d()
+		self.down_5 = conv_block_2_3d(self.num_filters * 8, self.num_filters * 16, activation)
+		self.pool_5 = max_pooling_3d()
+		
+		# Bridge
+		self.bridge = conv_block_2_3d(self.num_filters * 16, self.num_filters * 32, activation)
+		
+		# Up sampling
+		self.trans_1 = conv_trans_block_3d(self.num_filters * 32, self.num_filters * 32, activation)
+		self.up_1 = conv_block_2_3d(self.num_filters * 48, self.num_filters * 16, activation)
+		self.trans_2 = conv_trans_block_3d(self.num_filters * 16, self.num_filters * 16, activation)
+		self.up_2 = conv_block_2_3d(self.num_filters * 24, self.num_filters * 8, activation)
+		self.trans_3 = conv_trans_block_3d(self.num_filters * 8, self.num_filters * 8, activation)
+		self.up_3 = conv_block_2_3d(self.num_filters * 12, self.num_filters * 4, activation)
+		self.trans_4 = conv_trans_block_3d(self.num_filters * 4, self.num_filters * 4, activation)
+		self.up_4 = conv_block_2_3d(self.num_filters * 6, self.num_filters * 2, activation)
+		self.trans_5 = conv_trans_block_3d(self.num_filters * 2, self.num_filters * 2, activation)
+		self.up_5 = conv_block_2_3d(self.num_filters * 3, self.num_filters * 1, activation)
+		
+		# Output
+		#self.out = conv_block_3d(self.num_filters, self.out_dim, activation) #This is probably a bug!
+		self.out = nn.Conv3d(self.num_filters, self.out_dim, kernel_size=3, stride=1, padding=1)
+		self.out_bn = nn.BatchNorm3d(self.out_dim)
+
+	def forward(self,v_cond,p_cond,T_cond,cond_mask,bc_mask,v_old,p_old,T_old):
+		mask_flow = 1 - cond_mask
+		ones = toCuda(torch.ones(p_old.shape))
+		x = torch.cat([v_old, p_old, T_old,\
+					   mask_flow, cond_mask, bc_mask,\
+					   v_cond*cond_mask, p_cond*bc_mask, T_cond*bc_mask,\
+					   mask_flow*v_old, mask_flow*p_old, mask_flow*T_old],dim=1)
+		#3+1+1+
+		#1+1+1+
+		#3+1+1+
+		#3+1+1 = 18 
+		
+		# Down sampling
+		down_1 = self.down_1(x) # -> [1, 4, 128, 128, 128]
+		pool_1 = self.pool_1(down_1) # -> [1, 4, 64, 64, 64]
+		
+		down_2 = self.down_2(pool_1) # -> [1, 8, 64, 64, 64]
+		pool_2 = self.pool_2(down_2) # -> [1, 8, 32, 32, 32]
+		
+		down_3 = self.down_3(pool_2) # -> [1, 16, 32, 32, 32]
+		pool_3 = self.pool_3(down_3) # -> [1, 16, 16, 16, 16]
+		
+		down_4 = self.down_4(pool_3) # -> [1, 32, 16, 16, 16]
+		pool_4 = self.pool_4(down_4) # -> [1, 32, 8, 8, 8]
+		
+		down_5 = self.down_5(pool_4) # -> [1, 64, 8, 8, 8]
+		pool_5 = self.pool_5(down_5) # -> [1, 64, 4, 4, 4]
+		
+		# Bridge
+		bridge = self.bridge(pool_5) # -> [1, 128, 4, 4, 4]
+		
+		# Up sampling
+		trans_1 = self.trans_1(bridge) # -> [1, 128, 8, 8, 8]
+		concat_1 = torch.cat([trans_1, down_5], dim=1) # -> [1, 192, 8, 8, 8]
+		up_1 = self.up_1(concat_1) # -> [1, 64, 8, 8, 8]
+		
+		trans_2 = self.trans_2(up_1) # -> [1, 64, 16, 16, 16]
+		concat_2 = torch.cat([trans_2, down_4], dim=1) # -> [1, 96, 16, 16, 16]
+		up_2 = self.up_2(concat_2) # -> [1, 32, 16, 16, 16]
+		
+		trans_3 = self.trans_3(up_2) # -> [1, 32, 32, 32, 32]
+		concat_3 = torch.cat([trans_3, down_3], dim=1) # -> [1, 48, 32, 32, 32]
+		up_3 = self.up_3(concat_3) # -> [1, 16, 32, 32, 32]
+		
+		trans_4 = self.trans_4(up_3) # -> [1, 16, 64, 64, 64]
+		concat_4 = torch.cat([trans_4, down_2], dim=1) # -> [1, 24, 64, 64, 64]
+		up_4 = self.up_4(concat_4) # -> [1, 8, 64, 64, 64]
+		
+		trans_5 = self.trans_5(up_4) # -> [1, 8, 128, 128, 128]
+		concat_5 = torch.cat([trans_5, down_1], dim=1) # -> [1, 12, 128, 128, 128]
+		up_5 = self.up_5(concat_5) # -> [1, 4, 128, 128, 128]
+		
+		# Output
+		out = self.out_bn(self.out(up_5)) # -> [1, 4, 128, 128, 128]
+		
+		m = nn.ReLU()
+		v_new, p_new,T_new =    5*torch.tanh((v_old+out[:,0:3])/5), \
+											 m(p_old + out[:,3:4]) + 1e-6, \
+											 m(T_old + out[:,4:5]) + 1e-6
+ 
+class AdaptiveActivation(nn.Module):
+	def __init__(self, out_channels, activation_type='tanh'):
+		super(AdaptiveActivation, self).__init__()
+		
+		# 학습 가능한 파라미터 초기화
+		self.a = nn.Parameter(torch.ones(out_channels))
+		self.b = nn.Parameter(torch.ones(out_channels))
+		self.c = nn.Parameter(torch.zeros(out_channels))
+		self.d = nn.Parameter(torch.zeros(out_channels))
+		
+		# 활성화 함수 선택
+		if activation_type == 'tanh':
+			self.activation = torch.tanh
+		elif activation_type == 'relu':
+			self.activation = nn.ReLU()
+		elif activation_type == 'lrelu':
+			self.activation = nn.LeakyReLU(0.1, inplace=True)
+		else:
+			raise ValueError("activation_type must be either 'tanh', 'relu', or 'lrelu'")
+		
+	def forward(self, x):
+		# a * f(b * x + c) + d 계산
+		x = self.b * x + self.c  # b * x + c
+		x = self.activation(x)  # f_m(b * x + c)
+		x = self.a * x + self.d  # a * f_m(b * x + c) + d
+		return x
+
+class PDE_UNet_Ad(nn.Module):
 	
 	def __init__(self, hidden_size, v_activation_type='tanh'):
 		super(PDE_UNet, self).__init__()
@@ -118,9 +221,9 @@ class PDE_UNet(nn.Module):
 		mask_flow = 1 - cond_mask
 		ones = toCuda(torch.ones(p_old.shape))
 		x = torch.cat([v_old, p_old, T_old,\
-                       mask_flow, cond_mask, bc_mask,\
-                       v_cond*cond_mask, p_cond*bc_mask, T_cond*bc_mask,\
-                       mask_flow*v_old, mask_flow*p_old, mask_flow*T_old],dim=1)
+					   mask_flow, cond_mask, bc_mask,\
+					   v_cond*cond_mask, p_cond*bc_mask, T_cond*bc_mask,\
+					   mask_flow*v_old, mask_flow*p_old, mask_flow*T_old],dim=1)
 		#3+1+1+
 		#1+1+1+
 		#3+1+1+
@@ -173,8 +276,8 @@ class PDE_UNet(nn.Module):
 		p_new = nn.ReLU()(p_old + out[:,3:4]) + 1e-6
 		T_new = nn.ReLU()(T_old + out[:,4:5]) + 1e-6
 
-                            # 50000*torch.tanh((p_old+out[:,3:4])/50000) + 55000,\
-                            #  150*torch.tanh((T_old+out[:,4:5])/150) + 273,
+							# 50000*torch.tanh((p_old+out[:,3:4])/50000) + 55000,\
+							#  150*torch.tanh((T_old+out[:,4:5])/150) + 273,
 #		v_new, p_new,T_new =  v_old + out[:,0:3], \
 #                           m(p_old + out[:,3:4]) + 1e-6, \
 #                           m(T_old + out[:,4:5]) + 1e-6
