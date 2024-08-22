@@ -175,7 +175,7 @@ class AdaptiveActivation(nn.Module):
 class PDE_UNet_Ad(nn.Module):
 	
 	def __init__(self, hidden_size, v_activation_type='tanh'):
-		super(PDE_UNet, self).__init__()
+		super(PDE_UNet_Ad, self).__init__()
 		
 		self.in_dim = 18
 		self.out_dim = 5
